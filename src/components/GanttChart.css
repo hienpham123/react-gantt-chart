@@ -512,6 +512,7 @@
   position: relative;
   background: #fff;
   min-width: 0;
+  cursor: grab;
   /* Hide native scrollbar */
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* IE and Edge */
@@ -519,6 +520,10 @@
 
 .gantt-timeline::-webkit-scrollbar {
   display: none; /* Chrome, Safari, Opera */
+}
+
+.gantt-timeline:active {
+  cursor: grabbing;
 }
 
 /* Custom fixed scrollbars */
@@ -561,6 +566,44 @@
 .gantt-timeline-scrollbar-fixed {
   /* left will be set dynamically */
   position: fixed;
+}
+
+/* Fixed scrollbar at bottom of viewport */
+.gantt-fixed-scrollbar {
+  height: 40px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: auto;
+  scrollbar-color: #888 #f1f1f1;
+  cursor: pointer;
+  pointer-events: auto !important;
+  position: relative;
+}
+
+.gantt-fixed-scrollbar::-webkit-scrollbar {
+  height: 40px;
+  display: block;
+}
+
+.gantt-fixed-scrollbar::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.gantt-fixed-scrollbar::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 10px;
+  border: 3px solid #f1f1f1;
+  min-height: 35px;
+}
+
+.gantt-fixed-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.fixed_scrollbar {
+  position: fixed !important;
+  bottom: -5px !important;
+  z-index: 10000 !important;
 }
 
 .gantt-timeline .timeline-tasks {
@@ -625,6 +668,7 @@
   z-index: 2;
   display: flex;
   align-items: center;
+  pointer-events: auto;
 }
 
 .task-bar:hover {
@@ -897,7 +941,7 @@
 /* Scroll Arrows */
 .gantt-scroll-arrow {
   position: fixed;
-  top: 50vh;
+  /* top will be set dynamically via JavaScript */
   transform: translateY(-50%);
   border: none;
   background: none;
@@ -909,7 +953,7 @@
   justify-content: center;
   cursor: pointer;
   z-index: 1000;
-  transition: transform 0.3s ease-in-out, background-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  transition: transform 0.3s ease-in-out, background-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, top 0.2s ease;
   color: #666666;
   pointer-events: auto;
   will-change: transform;

@@ -12,8 +12,13 @@ const GanttTaskBar = ({
 }) => {
   const isMilestone = task.type === 'milestone';
 
-  const handleClick = () => {
+  const handleClick = (e) => {
+    e.stopPropagation();
     onSelect(task);
+  };
+
+  const handleMouseDown = (e) => {
+    e.stopPropagation();
   };
 
   const handleDoubleClick = (e) => {
@@ -37,6 +42,7 @@ const GanttTaskBar = ({
           borderRadius: '50%'
         }}
         onClick={handleClick}
+        onMouseDown={handleMouseDown}
         onDoubleClick={handleDoubleClick}
         title={task.name}
       />
@@ -52,6 +58,7 @@ const GanttTaskBar = ({
         height: '24px'
       }}
       onClick={handleClick}
+      onMouseDown={handleMouseDown}
       onDoubleClick={handleDoubleClick}
     >
       <div className="task-bar-content">

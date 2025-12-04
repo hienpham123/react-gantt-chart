@@ -61,6 +61,10 @@ const GanttChart = ({
   const tableRightArrowRef = useRef(null);
   const timelineLeftArrowRef = useRef(null);
   const timelineRightArrowRef = useRef(null);
+  const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
+  const timelineDragStartRef = useRef({ x: 0, scrollLeft: 0 });
+  const tableFixedScrollbarRef = useRef(null);
+  const timelineFixedScrollbarRef = useRef(null);
 
   // Tính toán timeline dates
   const timelineDates = useMemo(() => calculateTimelineDates(tasks, endYear), [tasks, endYear]);
@@ -322,6 +326,64 @@ const GanttChart = ({
     setCanScrollTimelineRight(scrollLeft < maxScrollLeft - 1);
   }, []);
 
+  // Handle timeline drag-to-scroll
+  const handleTimelineMouseDown = useCallback((e) => {
+    // Only start drag if clicking on timeline background, not on task bars
+    // Check if the click target is the timeline container or grid, not a task bar
+    const target = e.target;
+    const isTaskBar = target.closest('.task-bar') !== null;
+    const isTaskRow = target.closest('.timeline-task-row') !== null && !isTaskBar;
+    
+    // Only start drag if clicking on empty timeline area (not on task bars)
+    if (!isTaskBar && timelineRef.current) {
+      setIsDraggingTimeline(true);
+      timelineDragStartRef.current = {
+        x: e.clientX,
+        scrollLeft: timelineRef.current.scrollLeft
+      };
+      
+      // Change cursor to grabbing
+      if (timelineRef.current) {
+        timelineRef.current.style.cursor = 'grabbing';
+      }
+      
+      // Prevent default to avoid text selection
+      e.preventDefault();
+    }
+  }, []);
+
+  const handleTimelineMouseMove = useCallback((e) => {
+    if (isDraggingTimeline && timelineRef.current) {
+      const deltaX = e.clientX - timelineDragStartRef.current.x;
+      const newScrollLeft = timelineDragStartRef.current.scrollLeft - deltaX;
+      
+      // Clamp scroll position
+      const maxScrollLeft = timelineRef.current.scrollWidth - timelineRef.current.clientWidth;
+      const clampedScrollLeft = Math.max(0, Math.min(maxScrollLeft, newScrollLeft));
+      
+      timelineRef.current.scrollLeft = clampedScrollLeft;
+      
+      // Update state
+      setTimelineScrollLeft(clampedScrollLeft);
+      setScrollLeft(clampedScrollLeft);
+      
+      // Update arrow visibility
+      setCanScrollTimelineLeft(clampedScrollLeft > 0);
+      setCanScrollTimelineRight(clampedScrollLeft < maxScrollLeft - 1);
+    }
+  }, [isDraggingTimeline]);
+
+  const handleTimelineMouseUp = useCallback(() => {
+    if (isDraggingTimeline) {
+      setIsDraggingTimeline(false);
+      
+      // Reset cursor - remove inline style to let CSS handle it
+      if (timelineRef.current) {
+        timelineRef.current.style.cursor = '';
+      }
+    }
+  }, [isDraggingTimeline]);
+
   // Stop auto-scroll table
   const stopScrollTable = useCallback(() => {
     if (tableScrollIntervalRef.current) {
@@ -525,36 +587,89 @@ const GanttChart = ({
     };
   }, []);
 
+  // Handle global mouse events for timeline drag-to-scroll
+  React.useEffect(() => {
+    if (isDraggingTimeline) {
+      document.addEventListener('mousemove', handleTimelineMouseMove);
+      document.addEventListener('mouseup', handleTimelineMouseUp);
+      // Prevent text selection while dragging
+      document.body.style.userSelect = 'none';
+      
+      return () => {
+        document.removeEventListener('mousemove', handleTimelineMouseMove);
+        document.removeEventListener('mouseup', handleTimelineMouseUp);
+        document.body.style.userSelect = '';
+      };
+    }
+  }, [isDraggingTimeline, handleTimelineMouseMove, handleTimelineMouseUp]);
+
   // Update arrow positions based on container positions
   React.useEffect(() => {
     const updateArrowPositions = () => {
+      const viewportHeight = window.innerHeight;
+      
       // Update table arrows
       if (tableWrapperRef.current) {
         const tableRect = tableWrapperRef.current.getBoundingClientRect();
+        // Get actual scroll height of table content
+        let tableContentHeight = tableRect.height;
+        if (tableBodyRef.current) {
+          const tableContent = tableBodyRef.current.querySelector('.gantt-table');
+          if (tableContent) {
+            tableContentHeight = tableContent.scrollHeight;
+          }
+        }
+        
+        // If table height exceeds viewport, center in viewport; otherwise center in table
+        let arrowTop;
+        if (tableContentHeight > viewportHeight) {
+          arrowTop = viewportHeight / 2;
+        } else {
+          arrowTop = tableRect.top + tableRect.height / 2;
+        }
         
         if (tableLeftArrowRef.current) {
           tableLeftArrowRef.current.style.left = `${tableRect.left + 8}px`;
+          tableLeftArrowRef.current.style.top = `${arrowTop}px`;
         }
         if (tableRightArrowRef.current) {
           tableRightArrowRef.current.style.right = `${window.innerWidth - tableRect.right + 8}px`;
+          tableRightArrowRef.current.style.top = `${arrowTop}px`;
         }
       }
 
       // Update timeline arrows
       if (timelineWrapperRef.current && showTimeline) {
         const timelineRect = timelineWrapperRef.current.getBoundingClientRect();
+        // Get actual scroll height of timeline content
+        let timelineContentHeight = timelineRect.height;
+        if (timelineRef.current) {
+          timelineContentHeight = timelineRef.current.scrollHeight;
+        }
+        
+        // If timeline height exceeds viewport, center in viewport; otherwise center in timeline
+        let arrowTop;
+        if (timelineContentHeight > viewportHeight) {
+          arrowTop = viewportHeight / 2;
+        } else {
+          arrowTop = timelineRect.top + timelineRect.height / 2;
+        }
         
         if (timelineLeftArrowRef.current) {
           timelineLeftArrowRef.current.style.left = `${timelineRect.left + 8}px`;
+          timelineLeftArrowRef.current.style.top = `${arrowTop}px`;
         }
         if (timelineRightArrowRef.current) {
           timelineRightArrowRef.current.style.right = `${window.innerWidth - timelineRect.right + 8}px`;
+          timelineRightArrowRef.current.style.top = `${arrowTop}px`;
         }
       }
     };
 
     // Initial update with delay to ensure DOM is ready
     const timeoutId = setTimeout(updateArrowPositions, 0);
+    // Also update after a short delay to catch DOM updates from collapse/expand
+    const delayedUpdate = setTimeout(updateArrowPositions, 100);
 
     // Update on scroll and resize
     window.addEventListener('scroll', updateArrowPositions, true);
@@ -565,18 +680,472 @@ const GanttChart = ({
     if (tableWrapperRef.current) {
       resizeObserver.observe(tableWrapperRef.current);
     }
+    if (tableBodyRef.current) {
+      resizeObserver.observe(tableBodyRef.current);
+    }
     if (timelineWrapperRef.current) {
       resizeObserver.observe(timelineWrapperRef.current);
     }
 
     return () => {
       clearTimeout(timeoutId);
+      clearTimeout(delayedUpdate);
       window.removeEventListener('scroll', updateArrowPositions, true);
       window.removeEventListener('resize', updateArrowPositions);
       resizeObserver.disconnect();
     };
   }, [tableWidth, showTimeline, flatTasks]);
 
+  // Handle fixed scrollbar at bottom of viewport
+  React.useEffect(() => {
+    // Use refs to track sync state to avoid infinite loops
+    const isSyncingFromFixedRef = { current: false };
+    const isSyncingToFixedRef = { current: false };
+
+    // Sync scroll from fixed scrollbar to original (when user scrolls on fixed scrollbar)
+    const syncTableScrollFromFixed = (e) => {
+      if (isSyncingToFixedRef.current) return;
+      isSyncingFromFixedRef.current = true;
+      
+      const fixedScrollbar = tableFixedScrollbarRef.current;
+      if (!fixedScrollbar || !fixedScrollbar.classList.contains('fixed_scrollbar')) {
+        isSyncingFromFixedRef.current = false;
+        return;
+      }
+      
+      const scrollLeft = fixedScrollbar.scrollLeft;
+      // Sync to original elements
+      if (tableBodyRef.current) {
+        tableBodyRef.current.scrollLeft = scrollLeft;
+      }
+      if (tableHeaderRef.current) {
+        tableHeaderRef.current.scrollLeft = scrollLeft;
+      }
+      
+      requestAnimationFrame(() => {
+        isSyncingFromFixedRef.current = false;
+      });
+    };
+
+    const syncTimelineScrollFromFixed = (e) => {
+      if (isSyncingToFixedRef.current) return;
+      isSyncingFromFixedRef.current = true;
+      
+      const fixedScrollbar = timelineFixedScrollbarRef.current;
+      if (!fixedScrollbar || !fixedScrollbar.classList.contains('fixed_scrollbar')) {
+        isSyncingFromFixedRef.current = false;
+        return;
+      }
+      
+      const scrollLeft = fixedScrollbar.scrollLeft;
+      if (timelineRef.current) {
+        timelineRef.current.scrollLeft = scrollLeft;
+      }
+      
+      requestAnimationFrame(() => {
+        isSyncingFromFixedRef.current = false;
+      });
+    };
+
+    // Sync scroll from original to fixed scrollbar (when user scrolls on original)
+    const syncTableScrollToFixed = () => {
+      if (isSyncingFromFixedRef.current) return;
+      isSyncingToFixedRef.current = true;
+      
+      if (tableBodyRef.current && tableFixedScrollbarRef.current) {
+        const fixedScrollbar = tableFixedScrollbarRef.current;
+        if (fixedScrollbar.classList.contains('fixed_scrollbar')) {
+          fixedScrollbar.scrollLeft = tableBodyRef.current.scrollLeft;
+        }
+      }
+      
+      requestAnimationFrame(() => {
+        isSyncingToFixedRef.current = false;
+      });
+    };
+
+    const syncTimelineScrollToFixed = () => {
+      if (isSyncingFromFixedRef.current) return;
+      isSyncingToFixedRef.current = true;
+      
+      if (timelineRef.current && timelineFixedScrollbarRef.current) {
+        const fixedScrollbar = timelineFixedScrollbarRef.current;
+        if (fixedScrollbar.classList.contains('fixed_scrollbar')) {
+          fixedScrollbar.scrollLeft = timelineRef.current.scrollLeft;
+        }
+      }
+      
+      requestAnimationFrame(() => {
+        isSyncingToFixedRef.current = false;
+      });
+    };
+
+    const handleFixedScrollbar = () => {
+      const tableBodyElement = tableBodyRef.current;
+      const timelineElement = timelineRef.current;
+      const viewportHeight = window.innerHeight;
+      
+      // Handle table scrollbar
+      if (tableBodyElement && tableFixedScrollbarRef.current) {
+        const tableContainer = tableBodyElement.closest('.gantt-table-wrapper');
+        if (tableContainer) {
+          const containerRect = tableContainer.getBoundingClientRect();
+          const tableContent = tableBodyElement.querySelector('.gantt-table');
+          const tableScrollWidth = tableContent ? tableContent.scrollWidth : 0;
+          const tableClientWidth = tableBodyElement.clientWidth;
+          
+          // Check if table has horizontal scroll and is out of viewport
+          const hasHorizontalScroll = tableScrollWidth > tableClientWidth;
+          const isOutViewPort = containerRect.bottom > viewportHeight;
+          
+          if (hasHorizontalScroll && isOutViewPort) {
+            const fixedScrollbar = tableFixedScrollbarRef.current;
+            fixedScrollbar.classList.add('fixed_scrollbar');
+            fixedScrollbar.style.display = 'block';
+            fixedScrollbar.style.left = `${containerRect.left}px`;
+            fixedScrollbar.style.width = `${containerRect.width}px`;
+            
+            // Create/update inner element with correct width (giống dhtmlx-gantt: .gantt_hor_scroll > div)
+            let innerElement = fixedScrollbar.querySelector('div');
+            if (!innerElement) {
+              innerElement = document.createElement('div');
+              fixedScrollbar.appendChild(innerElement);
+            }
+            // Inner div phải có width = scrollWidth để scrollbar có thể scroll
+            // Đảm bảo width lớn hơn clientWidth để có thể scroll
+            const scrollbarWidth = containerRect.width;
+            // Đảm bảo inner width > scrollbar width để có thể scroll
+            const innerWidth = Math.max(tableScrollWidth, scrollbarWidth + 1);
+            innerElement.style.width = `${innerWidth}px`;
+            innerElement.style.height = '40px';
+            innerElement.style.display = 'block';
+            innerElement.style.minWidth = `${innerWidth}px`;
+            innerElement.style.flexShrink = '0';
+            // innerElement.style.pointerEvents = 'none'; // Không block mouse events
+            
+            // Ensure fixed scrollbar can scroll - luôn set overflowX = auto để có scrollbar
+            fixedScrollbar.style.overflowX = 'auto';
+            fixedScrollbar.style.overflowY = 'hidden';
+            fixedScrollbar.style.position = 'relative';
+            fixedScrollbar.style.cursor = 'pointer';
+            fixedScrollbar.style.userSelect = 'none'; // Prevent text selection when dragging
+            
+            // Đảm bảo scrollbar có thể scroll bằng cách set scrollLeft
+            // Sync scroll position from original to fixed (tạm thời remove listener để tránh loop)
+            isSyncingToFixedRef.current = true;
+            fixedScrollbar.scrollLeft = tableBodyElement.scrollLeft;
+            requestAnimationFrame(() => {
+              isSyncingToFixedRef.current = false;
+              // Re-attach listeners after sync
+              attachListeners();
+            });
+          } else {
+            const fixedScrollbar = tableFixedScrollbarRef.current;
+            fixedScrollbar.classList.remove('fixed_scrollbar');
+            fixedScrollbar.style.display = 'none';
+          }
+        }
+      }
+      
+      // Handle timeline scrollbar
+      if (timelineElement && showTimeline && timelineFixedScrollbarRef.current) {
+        const timelineContainer = timelineElement.closest('.gantt-timeline-wrapper');
+        if (timelineContainer) {
+          const containerRect = timelineContainer.getBoundingClientRect();
+          const timelineScrollWidth = timelineElement.scrollWidth;
+          const timelineClientWidth = timelineElement.clientWidth;
+          
+          // Check if timeline has horizontal scroll and is out of viewport
+          const hasHorizontalScroll = timelineScrollWidth > timelineClientWidth;
+          const isOutViewPort = containerRect.bottom > viewportHeight;
+          
+          if (hasHorizontalScroll && isOutViewPort) {
+            const fixedScrollbar = timelineFixedScrollbarRef.current;
+            fixedScrollbar.classList.add('fixed_scrollbar');
+            fixedScrollbar.style.display = 'block';
+            fixedScrollbar.style.left = `${containerRect.left}px`;
+            fixedScrollbar.style.width = `${containerRect.width}px`;
+            
+            // Create/update inner element with correct width (giống dhtmlx-gantt: .gantt_hor_scroll > div)
+            let innerElement = fixedScrollbar.querySelector('div');
+            if (!innerElement) {
+              innerElement = document.createElement('div');
+              fixedScrollbar.appendChild(innerElement);
+            }
+            // Inner div phải có width = scrollWidth để scrollbar có thể scroll
+            // Đảm bảo width lớn hơn clientWidth để có thể scroll
+            const scrollbarWidth = containerRect.width;
+            // Đảm bảo inner width > scrollbar width để có thể scroll
+            const innerWidth = Math.max(timelineScrollWidth, scrollbarWidth + 1);
+            innerElement.style.width = `${innerWidth}px`;
+            innerElement.style.height = '40px';
+            innerElement.style.display = 'block';
+            innerElement.style.minWidth = `${innerWidth}px`;
+            innerElement.style.flexShrink = '0';
+            // innerElement.style.pointerEvents = 'none'; // Không block mouse events
+            
+            // Ensure fixed scrollbar can scroll - luôn set overflowX = auto để có scrollbar
+            fixedScrollbar.style.overflowX = 'auto';
+            fixedScrollbar.style.overflowY = 'hidden';
+            fixedScrollbar.style.position = 'relative';
+            fixedScrollbar.style.cursor = 'pointer';
+            fixedScrollbar.style.userSelect = 'none'; // Prevent text selection when dragging
+            
+            // Đảm bảo scrollbar có thể scroll bằng cách set scrollLeft
+            // Sync scroll position from original to fixed (tạm thời remove listener để tránh loop)
+            isSyncingToFixedRef.current = true;
+            fixedScrollbar.scrollLeft = timelineElement.scrollLeft;
+            requestAnimationFrame(() => {
+              isSyncingToFixedRef.current = false;
+              // Re-attach listeners after sync
+              attachListeners();
+            });
+          } else {
+            const fixedScrollbar = timelineFixedScrollbarRef.current;
+            fixedScrollbar.classList.remove('fixed_scrollbar');
+            fixedScrollbar.style.display = 'none';
+          }
+        }
+      }
+    };
+
+    // Restore click to jump functionality and add drag support
+    let isDraggingTableScrollbar = false;
+    let isDraggingTimelineScrollbar = false;
+    let scrollbarDragStartX = 0;
+    let scrollbarDragStartScrollLeft = 0;
+    let scrollbarDragStartMouseX = 0;
+    let dragStartTime = 0;
+
+    const handleTableFixedScrollbarMouseDown = (e) => {
+      const fixedScrollbar = tableFixedScrollbarRef.current;
+      if (!fixedScrollbar || !fixedScrollbar.classList.contains('fixed_scrollbar')) return;
+      
+      // Always prevent default to handle all interactions ourselves
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const scrollbarRect = fixedScrollbar.getBoundingClientRect();
+      const clickX = e.clientX - scrollbarRect.left;
+      const scrollbarWidth = fixedScrollbar.clientWidth;
+      const scrollWidth = fixedScrollbar.scrollWidth;
+      const scrollLeft = fixedScrollbar.scrollLeft;
+      const maxScrollLeft = scrollWidth - scrollbarWidth;
+      
+      if (maxScrollLeft <= 0) return;
+      
+      // Store initial values for drag
+      scrollbarDragStartX = e.clientX;
+      scrollbarDragStartMouseX = clickX;
+      scrollbarDragStartScrollLeft = scrollLeft;
+      dragStartTime = Date.now();
+      
+      // Always start dragging mode - user can drag from anywhere
+      isDraggingTableScrollbar = true;
+      fixedScrollbar.style.cursor = 'grabbing';
+      document.body.style.userSelect = 'none';
+      
+      // If clicking on track (not thumb), also jump to position immediately
+      const thumbWidth = Math.max(40, (scrollbarWidth / scrollWidth) * scrollbarWidth);
+      const thumbLeft = (scrollLeft / maxScrollLeft) * (scrollbarWidth - thumbWidth);
+      const isOnThumb = clickX >= thumbLeft - 5 && clickX <= thumbLeft + thumbWidth + 5;
+      
+      if (!isOnThumb) {
+        // Click on track - jump to position first, then allow drag
+        const scrollRatio = clickX / scrollbarWidth;
+        const newScrollLeft = scrollRatio * maxScrollLeft;
+        fixedScrollbar.scrollLeft = Math.max(0, Math.min(newScrollLeft, maxScrollLeft));
+        scrollbarDragStartScrollLeft = fixedScrollbar.scrollLeft; // Update start position
+        syncTableScrollFromFixed();
+      }
+    };
+
+    const handleTimelineFixedScrollbarMouseDown = (e) => {
+      const fixedScrollbar = timelineFixedScrollbarRef.current;
+      if (!fixedScrollbar || !fixedScrollbar.classList.contains('fixed_scrollbar')) return;
+      
+      // Always prevent default to handle all interactions ourselves
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const scrollbarRect = fixedScrollbar.getBoundingClientRect();
+      const clickX = e.clientX - scrollbarRect.left;
+      const scrollbarWidth = fixedScrollbar.clientWidth;
+      const scrollWidth = fixedScrollbar.scrollWidth;
+      const scrollLeft = fixedScrollbar.scrollLeft;
+      const maxScrollLeft = scrollWidth - scrollbarWidth;
+      
+      if (maxScrollLeft <= 0) return;
+      
+      // Store initial values for drag
+      scrollbarDragStartX = e.clientX;
+      scrollbarDragStartMouseX = clickX;
+      scrollbarDragStartScrollLeft = scrollLeft;
+      dragStartTime = Date.now();
+      
+      // Always start dragging mode - user can drag from anywhere
+      isDraggingTimelineScrollbar = true;
+      fixedScrollbar.style.cursor = 'grabbing';
+      document.body.style.userSelect = 'none';
+      
+      // If clicking on track (not thumb), also jump to position immediately
+      const thumbWidth = Math.max(40, (scrollbarWidth / scrollWidth) * scrollbarWidth);
+      const thumbLeft = (scrollLeft / maxScrollLeft) * (scrollbarWidth - thumbWidth);
+      const isOnThumb = clickX >= thumbLeft - 5 && clickX <= thumbLeft + thumbWidth + 5;
+      
+      if (!isOnThumb) {
+        // Click on track - jump to position first, then allow drag
+        const scrollRatio = clickX / scrollbarWidth;
+        const newScrollLeft = scrollRatio * maxScrollLeft;
+        fixedScrollbar.scrollLeft = Math.max(0, Math.min(newScrollLeft, maxScrollLeft));
+        scrollbarDragStartScrollLeft = fixedScrollbar.scrollLeft; // Update start position
+        syncTimelineScrollFromFixed();
+      }
+    };
+
+    const handleScrollbarMouseMove = (e) => {
+      if (isDraggingTableScrollbar && tableFixedScrollbarRef.current) {
+        e.preventDefault();
+        const fixedScrollbar = tableFixedScrollbarRef.current;
+        const scrollbarRect = fixedScrollbar.getBoundingClientRect();
+        const mouseX = e.clientX - scrollbarRect.left;
+        const scrollbarWidth = fixedScrollbar.clientWidth;
+        const scrollWidth = fixedScrollbar.scrollWidth;
+        const maxScrollLeft = scrollWidth - scrollbarWidth;
+        
+        if (maxScrollLeft > 0) {
+          // Calculate scroll based on mouse movement from start position
+          const deltaX = mouseX - scrollbarDragStartMouseX;
+          const scrollRatio = deltaX / scrollbarWidth;
+          const newScrollLeft = scrollbarDragStartScrollLeft + (scrollRatio * maxScrollLeft);
+          fixedScrollbar.scrollLeft = Math.max(0, Math.min(newScrollLeft, maxScrollLeft));
+          syncTableScrollFromFixed();
+        }
+      }
+      
+      if (isDraggingTimelineScrollbar && timelineFixedScrollbarRef.current) {
+        e.preventDefault();
+        const fixedScrollbar = timelineFixedScrollbarRef.current;
+        const scrollbarRect = fixedScrollbar.getBoundingClientRect();
+        const mouseX = e.clientX - scrollbarRect.left;
+        const scrollbarWidth = fixedScrollbar.clientWidth;
+        const scrollWidth = fixedScrollbar.scrollWidth;
+        const maxScrollLeft = scrollWidth - scrollbarWidth;
+        
+        if (maxScrollLeft > 0) {
+          // Calculate scroll based on mouse movement from start position
+          const deltaX = mouseX - scrollbarDragStartMouseX;
+          const scrollRatio = deltaX / scrollbarWidth;
+          const newScrollLeft = scrollbarDragStartScrollLeft + (scrollRatio * maxScrollLeft);
+          fixedScrollbar.scrollLeft = Math.max(0, Math.min(newScrollLeft, maxScrollLeft));
+          syncTimelineScrollFromFixed();
+        }
+      }
+    };
+
+    const handleScrollbarMouseUp = () => {
+      if (isDraggingTableScrollbar && tableFixedScrollbarRef.current) {
+        tableFixedScrollbarRef.current.style.cursor = 'pointer';
+      }
+      if (isDraggingTimelineScrollbar && timelineFixedScrollbarRef.current) {
+        timelineFixedScrollbarRef.current.style.cursor = 'pointer';
+      }
+      document.body.style.userSelect = '';
+      isDraggingTableScrollbar = false;
+      isDraggingTimelineScrollbar = false;
+    };
+
+    // Attach event listeners - đảm bảo listeners được attach đúng cách
+    const attachListeners = () => {
+      // Remove old listeners first
+      if (tableFixedScrollbarRef.current) {
+        tableFixedScrollbarRef.current.removeEventListener('scroll', syncTableScrollFromFixed);
+        tableFixedScrollbarRef.current.removeEventListener('mousedown', handleTableFixedScrollbarMouseDown);
+      }
+      if (timelineFixedScrollbarRef.current) {
+        timelineFixedScrollbarRef.current.removeEventListener('scroll', syncTimelineScrollFromFixed);
+        timelineFixedScrollbarRef.current.removeEventListener('mousedown', handleTimelineFixedScrollbarMouseDown);
+      }
+      if (tableBodyRef.current) {
+        tableBodyRef.current.removeEventListener('scroll', syncTableScrollToFixed);
+      }
+      if (timelineRef.current) {
+        timelineRef.current.removeEventListener('scroll', syncTimelineScrollToFixed);
+      }
+      
+      // Attach new listeners - dùng scroll event và mouse events
+      if (tableFixedScrollbarRef.current && tableFixedScrollbarRef.current.classList.contains('fixed_scrollbar')) {
+        tableFixedScrollbarRef.current.addEventListener('scroll', syncTableScrollFromFixed);
+        tableFixedScrollbarRef.current.addEventListener('mousedown', handleTableFixedScrollbarMouseDown);
+      }
+      if (timelineFixedScrollbarRef.current && timelineFixedScrollbarRef.current.classList.contains('fixed_scrollbar')) {
+        timelineFixedScrollbarRef.current.addEventListener('scroll', syncTimelineScrollFromFixed);
+        timelineFixedScrollbarRef.current.addEventListener('mousedown', handleTimelineFixedScrollbarMouseDown);
+      }
+      
+      // Attach global mouse events for dragging
+      document.addEventListener('mousemove', handleScrollbarMouseMove);
+      document.addEventListener('mouseup', handleScrollbarMouseUp);
+      if (tableBodyRef.current) {
+        tableBodyRef.current.addEventListener('scroll', syncTableScrollToFixed);
+      }
+      if (timelineRef.current) {
+        timelineRef.current.addEventListener('scroll', syncTimelineScrollToFixed);
+      }
+    };
+
+    // Attach listeners initially
+    setTimeout(attachListeners, 200);
+    
+    // Initial check with delay to ensure DOM is ready
+    const timeoutId = setTimeout(() => {
+      handleFixedScrollbar();
+      // Re-attach listeners after initial setup
+      setTimeout(attachListeners, 100);
+    }, 100);
+    
+    // Update on scroll and resize
+    window.addEventListener('scroll', handleFixedScrollbar, true);
+    window.addEventListener('resize', handleFixedScrollbar);
+    
+    // Update when table/timeline dimensions change
+    const resizeObserver = new ResizeObserver(handleFixedScrollbar);
+    if (tableBodyRef.current) {
+      resizeObserver.observe(tableBodyRef.current);
+    }
+    if (timelineRef.current) {
+      resizeObserver.observe(timelineRef.current);
+    }
+    if (tableWrapperRef.current) {
+      resizeObserver.observe(tableWrapperRef.current);
+    }
+    if (timelineWrapperRef.current) {
+      resizeObserver.observe(timelineWrapperRef.current);
+    }
+
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('scroll', handleFixedScrollbar, true);
+      window.removeEventListener('resize', handleFixedScrollbar);
+      resizeObserver.disconnect();
+      if (tableFixedScrollbarRef.current) {
+        tableFixedScrollbarRef.current.removeEventListener('scroll', syncTableScrollFromFixed);
+        tableFixedScrollbarRef.current.removeEventListener('mousedown', handleTableFixedScrollbarMouseDown);
+      }
+      if (timelineFixedScrollbarRef.current) {
+        timelineFixedScrollbarRef.current.removeEventListener('scroll', syncTimelineScrollFromFixed);
+        timelineFixedScrollbarRef.current.removeEventListener('mousedown', handleTimelineFixedScrollbarMouseDown);
+      }
+      if (tableBodyRef.current) {
+        tableBodyRef.current.removeEventListener('scroll', syncTableScrollToFixed);
+      }
+      if (timelineRef.current) {
+        timelineRef.current.removeEventListener('scroll', syncTimelineScrollToFixed);
+      }
+      document.removeEventListener('mousemove', handleScrollbarMouseMove);
+      document.removeEventListener('mouseup', handleScrollbarMouseUp);
+    };
+  }, [flatTasks, showTimeline, tableWidth]);
 
   // Handle resize
   const handleResizeStart = useCallback((e) => {
@@ -771,6 +1340,9 @@ const GanttChart = ({
               onTaskSelect={handleTaskSelect}
               onTaskDoubleClick={handleTaskDoubleClick}
               onScroll={handleTimelineHorizontalScroll}
+              onMouseDown={handleTimelineMouseDown}
+              onMouseMove={handleTimelineMouseMove}
+              onMouseUp={handleTimelineMouseUp}
             />
             
             {/* Right arrow */}
@@ -796,6 +1368,22 @@ const GanttChart = ({
         onClose={handleDialogClose}
         onSave={handleTaskSave}
       />
+
+      {/* Fixed scrollbar for table */}
+      <div
+        ref={tableFixedScrollbarRef}
+        className="gantt-fixed-scrollbar gantt-table-fixed-scrollbar"
+        style={{ display: 'none' }}
+      />
+
+      {/* Fixed scrollbar for timeline */}
+      {showTimeline && (
+        <div
+          ref={timelineFixedScrollbarRef}
+          className="gantt-fixed-scrollbar gantt-timeline-fixed-scrollbar"
+          style={{ display: 'none' }}
+        />
+      )}
     </div>
   );
 };

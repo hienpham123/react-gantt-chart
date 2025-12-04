@@ -11,13 +11,19 @@ const GanttTimeline = React.forwardRef(({
   weekColumnWidth,
   onTaskSelect,
   onTaskDoubleClick,
-  onScroll 
+  onScroll,
+  onMouseDown,
+  onMouseMove,
+  onMouseUp
 }, ref) => {
   return (
     <div
       ref={ref}
       className="gantt-timeline"
       onScroll={onScroll}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
     >
       <div className="timeline-grid" style={{ width: `${weeklyRanges.length * weekColumnWidth}px` }}>
         {weeklyRanges.map((week, index) => (
@@ -89,11 +95,17 @@ GanttTimeline.propTypes = {
   onTaskSelect: PropTypes.func.isRequired,
   onTaskDoubleClick: PropTypes.func,
   onScroll: PropTypes.func.isRequired,
+  onMouseDown: PropTypes.func,
+  onMouseMove: PropTypes.func,
+  onMouseUp: PropTypes.func,
 };
 
 GanttTimeline.defaultProps = {
   selectedTask: null,
   onTaskDoubleClick: null,
+  onMouseDown: null,
+  onMouseMove: null,
+  onMouseUp: null,
 };
 
 export default React.memo(GanttTimeline);
